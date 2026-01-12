@@ -1,0 +1,290 @@
+{% extends 'Payment_Scheduler/base.html' %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white border-bottom py-3">
+                    <h5 class="card-title mb-0 fw-bold text-primary">
+                        <i class="fas fa-cash-register me-2"></i>Payment Transaction
+                    </h5>
+                </div>
+                <div class="card-body p-4">
+                    <form id="paymentForm">
+                        {% csrf_token %}
+                        <input type="hidden" id="payment_id" name="payment_id">
+                        <input type="hidden" id="customer_db_id" name="customer_id">
+                        
+                        <div class="mb-4">
+                            <button type="button" class="btn btn-primary w-100 py-3 fw-bold" data-bs-toggle="modal" data-bs-target="#customerSearchModal">
+                                <i class="fas fa-search me-2"></i>FIND CUSTOMER
+                            </button>
+                        </div>
+
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-6">
+                                <label class="form-label text-secondary small">Room No.</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light"><i class="fas fa-door-open"></i></span>
+                                    <input type="text" class="form-control bg-light" id="room_no" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-secondary small">Date Today</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light"><i class="fas fa-calendar-day"></i></span>
+                                    <input type="text" class="form-control bg-light" id="date_today" value="{% now 'Y-m-d' %}" readonly>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label text-secondary small">Customer Name</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light"><i class="fas fa-user"></i></span>
+                                    <input type="text" class="form-control bg-light" id="customer_name" readonly>
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr class="border-secondary opacity-25">
+
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-6">
+                                <label class="form-label text-secondary small">Due Date</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light"><i class="fas fa-calendar-alt"></i></span>
+                                    <input type="text" class="form-control bg-light" id="due_date" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-secondary small">Amount Due</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light">₱</span>
+                                    <input type="number" class="form-control bg-light fw-bold" id="balance_amount" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-secondary small">Payment Received</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white">₱</span>
+                                    <input type="number" class="form-control" id="amount_received" step="0.01" required oninput="calculateChange()">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-secondary small">Change</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light">₱</span>
+                                    <input type="number" class="form-control bg-light fw-bold text-success" id="amount_change" readonly>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label text-secondary small">Remarks</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white"><i class="fas fa-comment-alt"></i></span>
+                                    <textarea class="form-control" id="remarks" rows="2" placeholder="Enter remarks (optional)"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end">
+                            <button type="button" class="btn btn-success btn-lg px-5" id="saveBtn" onclick="processPayment()" disabled>
+                                <i class="fas fa-save me-2"></i>Confirm Payment
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="customerSearchModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold">Select Customer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group mb-3">
+                    <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-secondary"></i></span>
+                    <input type="text" class="form-control border-start-0 ps-0" id="customerSearchInput" placeholder="Type name or room number..." onkeyup="searchCustomers()">
+                </div>
+                <div class="list-group list-group-flush border rounded" id="customerResultList" style="max-height: 400px; overflow-y: auto;">
+                    <div class="p-4 text-center text-secondary">Start typing to search...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="receiptModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-body" id="receiptArea">
+                <div class="receipt-header text-center">
+                    <h5 class="fw-bold mb-0">SAKURA BOARDING HOUSE</h5>
+                    <p class="mb-0">Official Receipt</p>
+                </div>
+                <div class="receipt-divider text-center">--------------------------------</div>
+                <div class="receipt-info">
+                    <div class="d-flex justify-content-between"><span>Date Today:</span><span id="r_date_today"></span></div>
+                    <div class="d-flex justify-content-between"><span>Customer:</span><span id="r_name"></span></div>
+                    <div class="d-flex justify-content-between"><span>Room No:</span><span id="r_room"></span></div>
+                    <div class="d-flex justify-content-between"><span>Due Date:</span><span id="r_due_date"></span></div>
+                    <div class="d-flex justify-content-between"><span>Payment Date:</span><span id="r_payment_date"></span></div>
+                </div>
+                <div class="receipt-divider text-center">--------------------------------</div>
+                <div class="receipt-details">
+                    <div class="d-flex justify-content-between"><span>Amount Due:</span><span>₱<span id="r_due"></span></span></div>
+                    <div class="d-flex justify-content-between fw-bold"><span>Amount Paid:</span><span>₱<span id="r_cash"></span></span></div>
+                    <div class="d-flex justify-content-between"><span>Change:</span><span>₱<span id="r_change"></span></span></div>
+                </div>
+                <div class="receipt-divider text-center">--------------------------------</div>
+                <div class="text-center mt-2 small">Thank you for your payment!</div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-primary w-100" onclick="printReceipt()">Print Receipt</button>
+                <button type="button" class="btn btn-link w-100 text-muted" onclick="window.location.reload()">Close & Refresh</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    @media print {
+        body * { visibility: hidden; }
+        #receiptArea, #receiptArea * { visibility: visible; }
+        #receiptArea {
+            position: fixed; left: 0; top: 0; width: 80mm; padding: 5mm;
+            font-family: 'Courier New', Courier, monospace; font-size: 10pt; line-height: 1.2; color: #000; background: #fff;
+        }
+        @page { size: 80mm auto; margin: 0; }
+    }
+</style>
+
+<script>
+    function searchCustomers() {
+        const query = document.getElementById('customerSearchInput').value;
+        const list = document.getElementById('customerResultList');
+
+        if (query.trim().length < 1) {
+            list.innerHTML = '<div class="p-4 text-center text-secondary">Start typing to search...</div>';
+            return;
+        }
+
+        // Use the API endpoint path directly to avoid template tag issues if any
+        const searchUrl = `/api/search_customers/?q=${encodeURIComponent(query)}`;
+
+        fetch(searchUrl)
+            .then(response => {
+                if (!response.ok) throw new Error('Search failed');
+                return response.json();
+            })
+            .then(data => {
+                list.innerHTML = '';
+                if (data.length === 0) {
+                    list.innerHTML = '<div class="p-4 text-center text-secondary">No results found.</div>';
+                    return;
+                }
+                data.forEach(c => {
+                    const item = document.createElement('a');
+                    item.className = 'list-group-item list-group-item-action py-3';
+                    item.href = '#';
+                    item.innerHTML = `<strong>${c.name}</strong><br><small class="text-primary">Room ${c.room_no}</small>`;
+                    item.onclick = (e) => {
+                        e.preventDefault();
+                        selectCustomer(c.id);
+                    };
+                    list.appendChild(item);
+                });
+            })
+            .catch(error => {
+                console.error("Fetch error:", error);
+                list.innerHTML = '<div class="p-4 text-center text-danger">Error fetching data. Check Console.</div>';
+            });
+    }
+
+    function selectCustomer(pk) {
+        // Use direct API path for consistency
+        const balanceUrl = `/api/get_balance/${pk}/`;
+
+        fetch(balanceUrl)
+            .then(res => res.json())
+            .then(data => {
+                // Populate hidden and visible fields (ID kept internal only)
+                document.getElementById('customer_db_id').value = data.customer_db_id;
+                document.getElementById('customer_name').value = data.name;
+                document.getElementById('room_no').value = data.room_no;
+                document.getElementById('due_date').value = data.due_date;
+                document.getElementById('balance_amount').value = data.balance;
+                document.getElementById('payment_id').value = data.payment_id || "";
+                
+                
+                document.getElementById('saveBtn').disabled = false;
+                
+                // Hide modal
+                const modalEl = document.getElementById('customerSearchModal');
+                const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+                modal.hide();
+                
+                document.getElementById('amount_received').focus();
+            })
+            .catch(err => alert("Error: " + err));
+    }
+
+    function calculateChange() {
+        const due = parseFloat(document.getElementById('balance_amount').value) || 0;
+        const got = parseFloat(document.getElementById('amount_received').value) || 0;
+        const change = got - due;
+        document.getElementById('amount_change').value = change >= 0 ? change.toFixed(2) : "0.00";
+    }
+
+    function processPayment() {
+        const dbId = document.getElementById('customer_db_id').value;
+        const received = document.getElementById('amount_received').value;
+
+        if (!dbId) {
+            alert("Please select a customer first.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('customer_id', dbId);
+        formData.append('payment_id', document.getElementById('payment_id').value);
+        formData.append('amount_received', received);
+        formData.append('change_amount', document.getElementById('amount_change').value);
+        formData.append('remarks', document.getElementById('remarks').value);
+        formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+        fetch("{% url 'process_payment' %}", {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                const dateToday = document.getElementById('date_today').value;
+                document.getElementById('r_date_today').innerText = dateToday;
+                document.getElementById('r_payment_date').innerText = dateToday;
+                document.getElementById('r_name').innerText = document.getElementById('customer_name').value;
+                document.getElementById('r_room').innerText = document.getElementById('room_no').value;
+                document.getElementById('r_due_date').innerText = document.getElementById('due_date').value;
+                document.getElementById('r_due').innerText = document.getElementById('balance_amount').value;
+                document.getElementById('r_cash').innerText = received;
+                document.getElementById('r_change').innerText = document.getElementById('amount_change').value;
+                
+
+                new bootstrap.Modal(document.getElementById('receiptModal')).show();
+            } else {
+                alert("Error: " + data.error);
+            }
+        })
+        .catch(err => alert("Network Error: " + err));
+    }
+
+    function printReceipt() {
+        window.print();
+    }
+</script>
+{% endblock %}
