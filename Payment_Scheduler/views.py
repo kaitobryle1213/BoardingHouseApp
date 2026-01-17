@@ -7,7 +7,7 @@ from .forms import CustomerForm, BoardingHouseUserForm, BoardingHouseUserEditFor
 from datetime import date, timedelta
 from django.utils import timezone
 from django.http import JsonResponse
-from django.db.models import Q, Count, F, Sum
+from django.db.models import Q, Count, F, Sum, Case, When, Value, IntegerField, DecimalField, BooleanField, OuterRef, Subquery
 from django.db.models import Max
 from django.db.models import Prefetch
 from dateutil.relativedelta import relativedelta
@@ -605,13 +605,66 @@ def dashboard_api(request):
     limit = int(request.GET.get('limit', 12))
     offset = int(request.GET.get('offset', 0))
     sort = request.GET.get('sort', 'latest_payment')
-    base_qs = Customer.objects.all().annotate(last_paid=Max('payments__date_paid')).select_related('room').prefetch_related(
+    direction = request.GET.get('direction', 'desc')
+    
+    today = timezone.localdate()
+
+    # Subquery for cycle payments (Sum of payments for the current due date)
+    payments_sub = Payment.objects.filter(
+        customer=OuterRef('pk'),
+        due_date=OuterRef('due_date'),
+        is_paid=True
+    ).values('customer').annotate(total=Sum('amount_received')).values('total')
+
+    base_qs = Customer.objects.all().annotate(
+        last_paid=Max('payments__date_paid'),
+        cycle_paid_amount=Coalesce(Subquery(payments_sub), Value(0, output_field=DecimalField())),
+        room_price_val=Coalesce(F('room__price'), Value(0, output_field=DecimalField()))
+    ).annotate(
+        is_fully_paid=Case(
+            When(cycle_paid_amount__gte=F('room_price_val'), then=Value(True)),
+            default=Value(False),
+            output_field=BooleanField()
+        )
+    ).annotate(
+        status_priority=Case(
+            When(last_paid=today, then=Value(5)), # Paid Today
+            When(due_date__isnull=True, then=Value(6)), # No Schedule
+            When(Q(is_fully_paid=False) & Q(due_date__lt=today), then=Value(1)), # Overdue
+            When(Q(is_fully_paid=False) & Q(due_date=today), then=Value(2)), # Due Today
+            When(Q(is_fully_paid=False) & Q(due_date__lte=today + timedelta(days=3)), then=Value(3)), # Due Soon
+            default=Value(4), # Upcoming
+            output_field=IntegerField()
+        )
+    ).select_related('room').prefetch_related(
         Prefetch('payments', queryset=Payment.objects.filter(is_paid=True).only('amount_received', 'due_date', 'date_paid', 'remarks'))
     )
-    if sort == 'latest_entry':
-        base_qs = base_qs.order_by('-date_entry', '-last_paid')
+    
+    # Determine sort order prefix
+    order_prefix = '' if direction == 'asc' else '-'
+    
+    # Handle different sorting fields
+    if sort == 'name':
+        base_qs = base_qs.order_by(f'{order_prefix}name')
+    elif sort == 'room_no':
+        base_qs = base_qs.order_by(f'{order_prefix}room__room_number')
+    elif sort == 'prev_payment':
+        base_qs = base_qs.order_by(f'{order_prefix}last_paid')
+    elif sort == 'due_date':
+        base_qs = base_qs.order_by(f'{order_prefix}due_date')
+    elif sort == 'room_rate':
+        base_qs = base_qs.order_by(f'{order_prefix}room__price')
+    elif sort == 'amount':
+        # This requires more complex handling since it's based on payment amounts
+        base_qs = base_qs.order_by(f'{order_prefix}last_paid')
+    elif sort == 'status':
+        # Sort by priority first, then due date
+        base_qs = base_qs.order_by(f'{order_prefix}status_priority', f'{order_prefix}due_date')
+    elif sort == 'latest_entry':
+        base_qs = base_qs.order_by(f'{order_prefix}date_entry', f'{order_prefix}last_paid')
     else:
-        base_qs = base_qs.order_by('-last_paid', '-date_entry')
+        # Default sorting by latest payment
+        base_qs = base_qs.order_by(f'{order_prefix}last_paid', f'{order_prefix}date_entry')
     total = base_qs.count()
     customers = base_qs[offset:offset + limit]
     today = timezone.localdate()
@@ -672,7 +725,7 @@ def dashboard_api(request):
 
         data.append({
             'name': customer.name,
-            'room_no': customer.room.room_number if customer.room else (customer.room_no or "-"),
+            'room_no': customer.room.room_number if customer.room else "-",
             'prev_payment': last_payment_date.strftime('%b %d, %Y') if last_payment_date else "-",
             'due_date': effective_due.strftime('%b %d, %Y') if effective_due else "N/A",
             'room_rate': f"₱{price}" if customer.room else "-",
@@ -773,6 +826,7 @@ def report_view(request):
     date_from = request.GET.get('date_from')
     date_to = request.GET.get('date_to')
     customer_name = request.GET.get('customer_name')
+    status_filter = request.GET.get('status')
 
     if room_id:
         customers = customers.filter(room__id=room_id)
@@ -848,6 +902,19 @@ def report_view(request):
                 'status': status,
             })
 
+    # Apply Status Filter
+    if status_filter:
+        filtered_rows = []
+        for r in rows:
+            if status_filter == 'Partially Paid':
+                if 'Partially Paid' in r['status']:
+                    filtered_rows.append(r)
+            elif r['status'] == status_filter:
+                filtered_rows.append(r)
+        rows = filtered_rows
+        # Recompute total collected for filtered view
+        total_collected = sum(r['paid_amount'] for r in rows)
+
     total_amount = "{:,.2f}".format(total_collected)
 
     # Get all rooms for the filter dropdown
@@ -859,6 +926,7 @@ def report_view(request):
         'rooms': rooms,
         # Pass back filter values to keep them in the form
         'filter_room': int(room_id) if room_id else '',
+        'filter_status': status_filter,
         'filter_date_from': date_from,
         'filter_date_to': date_to,
         'filter_name': customer_name,

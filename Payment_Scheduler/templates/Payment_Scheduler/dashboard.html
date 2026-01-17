@@ -33,6 +33,41 @@
     .custom-scroll::-webkit-scrollbar-thumb:hover {
         background: #a8a8a8; 
     }
+
+    /* Sorting Indicators */
+    .sortable {
+        cursor: pointer;
+        position: relative;
+        user-select: none;
+    }
+    
+    .sortable:hover {
+        background-color: #f8f9fa;
+    }
+    
+    .sort-indicator {
+        display: inline-block;
+        width: 0;
+        height: 0;
+        margin-left: 4px;
+        vertical-align: middle;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-bottom: 4px solid #6c757d;
+        opacity: 0.5;
+    }
+    
+    .sort-asc .sort-indicator {
+        border-bottom-color: #007bff;
+        opacity: 1;
+        border-top: none;
+    }
+    
+    .sort-desc .sort-indicator {
+        border-top: 4px solid #007bff;
+        border-bottom: none;
+        opacity: 1;
+    }
 </style>
 
 <div class="card border-0">
@@ -41,13 +76,13 @@
         <table class="table table-hover mb-0" id="dashboard-table">
             <thead class="bg-light" style="position: sticky; top: 0; z-index: 1;">
                 <tr>
-                    <th class="ps-4">Name</th>
-                    <th>Room No.</th>
-                    <th>Previous Payment</th>
-                    <th>Due Date</th>
-                    <th>Room Rate</th>
-                    <th>Paid Amount</th>
-                    <th>Status</th>
+                    <th class="ps-4 sortable" data-sort="name">Name <span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort="room_no">Room No. <span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort="prev_payment">Previous Payment <span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort="due_date">Due Date <span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort="room_rate">Room Rate <span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort="amount">Paid Amount <span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort="status">Status <span class="sort-indicator"></span></th>
                 </tr>
             </thead>
             <tbody id="dashboard-table-body">
@@ -70,6 +105,8 @@
     let dashHasMore = true;
     let dashLoading = false;
     let dashLoadedCount = 0;
+    let currentSortField = 'latest_payment';
+    let currentSortDirection = 'desc';
 
     function renderRowContent(item) {
         const dueCls = (item.color === 'red' || item.color === 'black') ? 'text-danger fw-bold' : '';
@@ -112,12 +149,13 @@
     }
 
     function refreshDashboard() {
-        if (dashLoading) return; // Don't refresh if loading more
+        if (dashLoading || dashLoadedCount === 0) return; // Don't refresh if loading or no data
 
-        // Fetch all currently loaded items (or one page if nothing loaded yet)
-        const currentCount = Math.max(dashLoadedCount, dashLimit);
+        // Store current scroll position
+        const scrollTop = scrollContainer.scrollTop;
         
-        fetch(`{% url 'dashboard_api' %}?offset=0&limit=${currentCount}&sort=latest_payment`)
+        // Fetch only status updates for currently loaded items
+        fetch(`{% url 'dashboard_api' %}?offset=0&limit=${dashLoadedCount}&sort=${currentSortField}&direction=${currentSortDirection}`)
             .then(r => r.json())
             .then(data => {
                 const tbody = document.getElementById('dashboard-table-body');
@@ -125,42 +163,28 @@
                 const newItems = data.payment_data;
                 
                 if (newItems.length === 0) {
-                     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3 text-secondary">No records found.</td></tr>';
-                     dashLoadedCount = 0;
-                } else {
-                    // Update existing rows or append new ones
+                    // No data found, clear table
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3 text-secondary">No records found.</td></tr>';
+                    dashLoadedCount = 0;
+                } else if (newItems.length === rows.length) {
+                    // Perfect match - update rows in place
                     for (let i = 0; i < newItems.length; i++) {
-                        if (i < rows.length) {
-                            // Update existing row
-                            rows[i].innerHTML = renderRowContent(newItems[i]);
-                        } else {
-                            // Append new row
-                            tbody.appendChild(renderRow(newItems[i]));
-                        }
+                        rows[i].innerHTML = renderRowContent(newItems[i]);
                     }
-                    
-                    // Remove extra rows if any (e.g. if items were deleted)
-                    while (rows.length > newItems.length) {
-                        tbody.deleteRow(rows.length - 1);
-                    }
-                    
+                } else {
+                    // Mismatch in item count, do a full reload
+                    tbody.innerHTML = '';
+                    newItems.forEach(item => {
+                        tbody.appendChild(renderRow(item));
+                    });
                     dashLoadedCount = newItems.length;
                 }
                 
                 // Update state
                 dashHasMore = data.has_more;
-                dashOffset = data.next_offset || dashOffset; 
-
-                // Update Load More button visibility
-                const loadMoreContainer = document.getElementById('load-more-container');
-                const btn = document.querySelector('#load-more-container button');
-                if (dashHasMore) {
-                    loadMoreContainer.style.display = 'block';
-                    if(btn) btn.innerHTML = '<i class="fas fa-chevron-down me-1"></i> Load More Customers';
-                } else {
-                    loadMoreContainer.style.display = 'none';
-                }
                 
+                // Restore scroll position
+                scrollContainer.scrollTop = scrollTop;
                 updateTime();
             })
             .catch(err => console.error("Auto-refresh failed", err));
@@ -174,7 +198,7 @@
         const btn = document.querySelector('#load-more-container button');
         if(btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
 
-        fetch(`{% url 'dashboard_api' %}?offset=${dashOffset}&limit=${dashLimit}&sort=latest_payment`)
+        fetch(`{% url 'dashboard_api' %}?offset=${dashOffset}&limit=${dashLimit}&sort=${currentSortField}&direction=${currentSortDirection}`)
             .then(r => r.json())
             .then(data => {
                 appendRows(data.payment_data);
@@ -205,6 +229,54 @@
 
     const scrollContainer = document.getElementById('dashboard-scroll-container');
     const sentinel = document.getElementById('dashboard-sentinel');
+
+    // Sorting functionality
+    function handleHeaderClick(field) {
+        if (currentSortField === field) {
+            // Toggle direction if same field
+            currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            // New field, default to ascending
+            currentSortField = field;
+            currentSortDirection = 'asc';
+        }
+        
+        // Update UI indicators
+        updateSortIndicators();
+        
+        // Reset and reload data with new sorting
+        dashOffset = 0;
+        dashLoadedCount = 0;
+        
+        // Clear the table and show loading
+        const tbody = document.getElementById('dashboard-table-body');
+        tbody.innerHTML = '<tr id="loading-row"><td colspan="7" class="text-center py-3 text-secondary">Loading...</td></tr>';
+        
+        // Reset scroll position
+        scrollContainer.scrollTop = 0;
+        
+        loadMoreDashboard();
+    }
+
+    function updateSortIndicators() {
+        // Remove all sort classes
+        document.querySelectorAll('.sortable').forEach(th => {
+            th.classList.remove('sort-asc', 'sort-desc');
+        });
+        
+        // Add appropriate class to current sort field
+        const currentHeader = document.querySelector(`[data-sort="${currentSortField}"]`);
+        if (currentHeader) {
+            currentHeader.classList.add(currentSortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    }
+
+    // Add click event listeners to sortable headers
+    document.querySelectorAll('.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            handleHeaderClick(th.getAttribute('data-sort'));
+        });
+    });
 
     const observer = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting) {

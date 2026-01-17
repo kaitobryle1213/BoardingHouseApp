@@ -20,7 +20,7 @@
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body bg-light">
         <form method="get" class="row g-3 align-items-end">
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label small fw-bold text-secondary">Customer Name</label>
                 <div class="input-group">
                     <span class="input-group-text bg-white"><i class="fas fa-user"></i></span>
@@ -42,6 +42,18 @@
                 </div>
             </div>
             <div class="col-md-2">
+                <label class="form-label small fw-bold text-secondary">Status</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-white"><i class="fas fa-info-circle"></i></span>
+                    <select name="status" class="form-select">
+                        <option value="">All Status</option>
+                        <option value="Paid" {% if filter_status == 'Paid' %}selected{% endif %}>Paid</option>
+                        <option value="Unpaid" {% if filter_status == 'Unpaid' %}selected{% endif %}>Unpaid</option>
+                        <option value="Partially Paid" {% if filter_status == 'Partially Paid' %}selected{% endif %}>Partially Paid</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-2">
                 <label class="form-label small fw-bold text-secondary">Date Paid From</label>
                 <div class="input-group">
                     <span class="input-group-text bg-white"><i class="fas fa-calendar-alt"></i></span>
@@ -55,7 +67,7 @@
                     <input type="date" name="date_to" class="form-control" value="{{ filter_date_to|default:'' }}">
                 </div>
             </div>
-            <div class="col-md-3 d-flex gap-2">
+            <div class="col-md-2 d-flex gap-2">
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="fas fa-filter me-1"></i> Filter
                 </button>
@@ -99,6 +111,33 @@
     .custom-scroll::-webkit-scrollbar-thumb:hover {
         background: #a8a8a8; 
     }
+    
+    /* Sorting Styles */
+    .sortable {
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+        transition: background-color 0.2s;
+    }
+    .sortable:hover {
+        background-color: #e2e6ea !important; /* Slightly darker than bg-light */
+    }
+    .sortable::after {
+        content: ' \f0dc'; /* FontAwesome sort icon */
+        font-family: 'Font Awesome 5 Free';
+        font-weight: 900;
+        opacity: 0.3;
+        margin-left: 5px;
+        font-size: 0.8em;
+    }
+    .sortable.sort-asc::after {
+        content: ' \f0de'; /* Sort up */
+        opacity: 1;
+    }
+    .sortable.sort-desc::after {
+        content: ' \f0dd'; /* Sort down */
+        opacity: 1;
+    }
 </style>
 
 <div class="card border-0 shadow-sm">
@@ -106,16 +145,16 @@
         <table class="table table-hover mb-0">
             <thead class="bg-light" style="position: sticky; top: 0; z-index: 1;">
                 <tr>
-                    <th class="ps-4">Customer Name</th>
-                    <th>Contact No.</th>
-                    <th>Parent's Name</th>
-                    <th>Room No.</th>
-                    <th>Date Entry</th>
-                    <th>Due Date</th>
-                    <th>Cycle Paid</th>
-                    <th>Status</th>
-                    <th>Last Payment Date</th>
-                    <th>Remarks</th>
+                    <th class="ps-4 sortable" onclick="sortTable(0, 'text')">Customer Name</th>
+                    <th class="sortable" onclick="sortTable(1, 'text')">Contact No.</th>
+                    <th class="sortable" onclick="sortTable(2, 'text')">Parent's Name</th>
+                    <th class="sortable" onclick="sortTable(3, 'room')">Room No.</th>
+                    <th class="sortable" onclick="sortTable(4, 'date')">Date Entry</th>
+                    <th class="sortable" onclick="sortTable(5, 'date')">Due Date</th>
+                    <th class="sortable" onclick="sortTable(6, 'currency')">Cycle Paid</th>
+                    <th class="sortable" onclick="sortTable(7, 'text')">Status</th>
+                    <th class="sortable" onclick="sortTable(8, 'date')">Last Payment Date</th>
+                    <th class="sortable" onclick="sortTable(9, 'text')">Remarks</th>
                 </tr>
             </thead>
             <tbody>
@@ -146,4 +185,83 @@
         </table>
     </div>
 </div>
+
+<script>
+    let currentSortCol = -1;
+    let currentSortDir = 'asc';
+
+    function sortTable(colIndex, type) {
+        const table = document.querySelector('table tbody');
+        const rows = Array.from(table.rows);
+        
+        // Skip if no rows or only "No records" row
+        if (rows.length === 0 || (rows.length === 1 && rows[0].cells.length === 1)) return;
+
+        // Toggle sort direction
+        if (currentSortCol === colIndex) {
+            currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSortCol = colIndex;
+            currentSortDir = 'asc';
+        }
+        
+        // Update headers
+        document.querySelectorAll('th.sortable').forEach((th, index) => {
+            th.classList.remove('sort-asc', 'sort-desc');
+            if (index === colIndex) {
+                th.classList.add('sort-' + currentSortDir);
+            }
+        });
+
+        // Sort rows
+        rows.sort((a, b) => {
+            let valA = getCellValue(a, colIndex);
+            let valB = getCellValue(b, colIndex);
+            
+            if (type === 'date') {
+                valA = parseDate(valA);
+                valB = parseDate(valB);
+                return currentSortDir === 'asc' ? valA - valB : valB - valA;
+            } else if (type === 'currency') {
+                valA = parseCurrency(valA);
+                valB = parseCurrency(valB);
+                return currentSortDir === 'asc' ? valA - valB : valB - valA;
+            } else if (type === 'room') {
+                 valA = parseRoom(valA);
+                 valB = parseRoom(valB);
+                 return currentSortDir === 'asc' ? 
+                    (valA > valB ? 1 : valA < valB ? -1 : 0) : 
+                    (valB > valA ? 1 : valB < valA ? -1 : 0);
+            } else {
+                // Text
+                return currentSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            }
+        });
+        
+        // Re-append rows
+        rows.forEach(row => table.appendChild(row));
+    }
+
+    function getCellValue(row, index) {
+        return row.cells[index].innerText.trim();
+    }
+
+    function parseCurrency(str) {
+        return parseFloat(str.replace(/[^0-9.-]+/g,"")) || 0;
+    }
+
+    function parseDate(str) {
+        if (str === '-' || str === 'N/A' || !str) return new Date(0); 
+        return new Date(str);
+    }
+
+    function parseRoom(str) {
+        // "RM. #: 101" -> 101
+        // Extract numbers
+        const match = str.match(/\d+/);
+        if (match) return parseInt(match[0]);
+        // Handle "No Room" or other strings by returning a high number/string to put them at bottom/top
+        return str === '-' ? 999999 : str;
+    }
+</script>
 {% endblock %}
