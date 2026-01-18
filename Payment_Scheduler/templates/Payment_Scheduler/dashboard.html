@@ -107,6 +107,7 @@
     let dashLoadedCount = 0;
     let currentSortField = 'latest_payment';
     let currentSortDirection = 'desc';
+    let fetchController = null;
 
     function renderRowContent(item) {
         const dueCls = (item.color === 'red' || item.color === 'black') ? 'text-danger fw-bold' : '';
@@ -158,6 +159,9 @@
         fetch(`{% url 'dashboard_api' %}?offset=0&limit=${dashLoadedCount}&sort=${currentSortField}&direction=${currentSortDirection}`)
             .then(r => r.json())
             .then(data => {
+                // If we started loading/sorting while this request was in flight, ignore result
+                if (dashLoading || dashLoadedCount === 0) return;
+
                 const tbody = document.getElementById('dashboard-table-body');
                 const rows = tbody.rows;
                 const newItems = data.payment_data;
@@ -198,7 +202,14 @@
         const btn = document.querySelector('#load-more-container button');
         if(btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
 
-        fetch(`{% url 'dashboard_api' %}?offset=${dashOffset}&limit=${dashLimit}&sort=${currentSortField}&direction=${currentSortDirection}`)
+        // Abort previous request if any
+        if (fetchController) fetchController.abort();
+        const currentController = new AbortController();
+        fetchController = currentController;
+
+        fetch(`{% url 'dashboard_api' %}?offset=${dashOffset}&limit=${dashLimit}&sort=${currentSortField}&direction=${currentSortDirection}`, {
+            signal: currentController.signal
+        })
             .then(r => r.json())
             .then(data => {
                 appendRows(data.payment_data);
@@ -221,10 +232,17 @@
                     }
                 }, 100);
             })
-            .catch(() => {
+            .catch((err) => {
+                if (err.name === 'AbortError') return;
                 if(btn) btn.innerHTML = '<i class="fas fa-redo me-1"></i> Retry Loading';
             })
-            .finally(() => { dashLoading = false; });
+            .finally(() => { 
+                // Only reset loading if this is still the active controller
+                if (fetchController === currentController) {
+                    dashLoading = false;
+                    fetchController = null;
+                }
+            });
     }
 
     const scrollContainer = document.getElementById('dashboard-scroll-container');
@@ -244,9 +262,17 @@
         // Update UI indicators
         updateSortIndicators();
         
-        // Reset and reload data with new sorting
+        // Cancel any ongoing fetch
+        if (fetchController) {
+            fetchController.abort();
+            fetchController = null;
+        }
+        dashLoading = false;
+
+        // Reset state
         dashOffset = 0;
         dashLoadedCount = 0;
+        dashHasMore = true; // Reset hasMore to allow loading
         
         // Clear the table and show loading
         const tbody = document.getElementById('dashboard-table-body');

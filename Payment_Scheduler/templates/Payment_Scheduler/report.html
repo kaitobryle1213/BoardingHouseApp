@@ -191,8 +191,8 @@
     let currentSortDir = 'asc';
 
     function sortTable(colIndex, type) {
-        const table = document.querySelector('table tbody');
-        const rows = Array.from(table.rows);
+        const tableBody = document.querySelector('table tbody');
+        const rows = Array.from(tableBody.rows);
         
         // Skip if no rows or only "No records" row
         if (rows.length === 0 || (rows.length === 1 && rows[0].cells.length === 1)) return;
@@ -205,7 +205,7 @@
             currentSortDir = 'asc';
         }
         
-        // Update headers
+        // Update headers immediately
         document.querySelectorAll('th.sortable').forEach((th, index) => {
             th.classList.remove('sort-asc', 'sort-desc');
             if (index === colIndex) {
@@ -213,37 +213,54 @@
             }
         });
 
-        // Sort rows
-        rows.sort((a, b) => {
-            let valA = getCellValue(a, colIndex);
-            let valB = getCellValue(b, colIndex);
-            
-            if (type === 'date') {
-                valA = parseDate(valA);
-                valB = parseDate(valB);
-                return currentSortDir === 'asc' ? valA - valB : valB - valA;
-            } else if (type === 'currency') {
-                valA = parseCurrency(valA);
-                valB = parseCurrency(valB);
-                return currentSortDir === 'asc' ? valA - valB : valB - valA;
-            } else if (type === 'room') {
-                 valA = parseRoom(valA);
-                 valB = parseRoom(valB);
-                 return currentSortDir === 'asc' ? 
-                    (valA > valB ? 1 : valA < valB ? -1 : 0) : 
-                    (valB > valA ? 1 : valB < valA ? -1 : 0);
-            } else {
-                // Text
-                return currentSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-            }
-        });
-        
-        // Re-append rows
-        rows.forEach(row => table.appendChild(row));
-    }
+        // Show loading cursor
+        document.body.style.cursor = 'wait';
 
-    function getCellValue(row, index) {
-        return row.cells[index].innerText.trim();
+        // Use setTimeout to allow UI update before heavy processing
+        setTimeout(() => {
+            // 1. Map to extract values (Schwartzian transform)
+            // This reduces DOM access to O(N) instead of O(N log N)
+            const mappedRows = rows.map(row => {
+                const cell = row.cells[colIndex];
+                const text = cell ? cell.textContent.trim() : '';
+                let value;
+                
+                if (type === 'date') {
+                    value = parseDate(text).getTime();
+                } else if (type === 'currency') {
+                    value = parseCurrency(text);
+                } else if (type === 'room') {
+                    value = parseRoom(text);
+                } else {
+                    value = text.toLowerCase();
+                }
+                
+                return { row, value };
+            });
+
+            // 2. Sort the mapped array
+            mappedRows.sort((a, b) => {
+                const valA = a.value;
+                const valB = b.value;
+                
+                if (valA === valB) return 0;
+
+                if (currentSortDir === 'asc') {
+                    return valA > valB ? 1 : -1;
+                } else {
+                    return valA < valB ? 1 : -1;
+                }
+            });
+            
+            // 3. Re-append rows using DocumentFragment for better performance
+            const fragment = document.createDocumentFragment();
+            mappedRows.forEach(obj => fragment.appendChild(obj.row));
+            
+            tableBody.appendChild(fragment);
+
+            // Reset cursor
+            document.body.style.cursor = 'default';
+        }, 10);
     }
 
     function parseCurrency(str) {
@@ -260,7 +277,7 @@
         // Extract numbers
         const match = str.match(/\d+/);
         if (match) return parseInt(match[0]);
-        // Handle "No Room" or other strings by returning a high number/string to put them at bottom/top
+        // Handle "No Room" or other strings by returning a high number
         return str === '-' ? 999999 : str;
     }
 </script>
