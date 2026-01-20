@@ -802,7 +802,9 @@ def process_payment(request):
             payment.is_paid = True
             payment.save()
             
-            if customer.due_date and timezone.localdate() > customer.due_date:
+            # Advance due date whenever payment is fully paid (early, on time, or late)
+            room_price = customer.room.price if customer.room else 0
+            if customer.due_date and payment.amount_received >= room_price:
                 customer.due_date = customer.due_date + relativedelta(months=1)
                 customer.save(update_fields=['due_date'])
             
