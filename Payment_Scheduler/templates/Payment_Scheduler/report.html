@@ -138,6 +138,26 @@
         content: ' \f0dd'; /* Sort down */
         opacity: 1;
     }
+    @media print {
+        body * { visibility: hidden; }
+        #receiptReprintArea, #receiptReprintArea * { visibility: visible; }
+        #receiptReprintArea {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 80mm;
+            padding: 5mm;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 10pt;
+            line-height: 1.2;
+            color: #000;
+            background: #fff;
+        }
+        @page {
+            size: 80mm auto;
+            margin: 0;
+        }
+    }
 </style>
 
 <div class="card border-0 shadow-sm">
@@ -171,7 +191,14 @@
                     <td class="font-monospace fw-bold {% if r.status == 'Paid' %}text-success{% else %}text-secondary{% endif %}">₱{{ r.paid_amount }}</td>
                     <td class="fw-medium">{% if r.status %}{{ r.status }}{% else %}-{% endif %}</td>
                     <td>{{ r.date_amount_paid|date:"M d, Y"|default:"-" }}</td>
-                    <td class="small text-muted fst-italic">{{ r.remarks|default:"-" }}</td>
+                    <td class="small text-muted fst-italic">
+                        {{ r.remarks|default:"-" }}
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="reprintReceipt(this)">
+                                <i class="fas fa-print me-1"></i>Reprint Receipt
+                            </button>
+                        </div>
+                    </td>
                 </tr>
                 {% empty %}
                 <tr>
@@ -183,6 +210,62 @@
                 {% endfor %}
             </tbody>
         </table>
+    </div>
+</div>
+
+<div class="modal fade" id="receiptReprintModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-body" id="receiptReprintArea">
+                <div class="text-center mb-2">
+                    <h5 class="mb-0 fw-bold">SAKURA BOARDING HOUSE</h5>
+                    <div>Payment Receipt</div>
+                </div>
+                <div class="mb-2 small">
+                    <div class="d-flex justify-content-between">
+                        <span>Receipt #:</span><span id="rp_id"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Print Date:</span><span id="rp_print_date"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Customer:</span><span id="rp_name"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Contact:</span><span id="rp_contact"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Parent:</span><span id="rp_parent"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Room No.:</span><span id="rp_room"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Date Entry:</span><span id="rp_date_entry"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Due Date:</span><span id="rp_due_date"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Status:</span><span id="rp_status"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Amount Paid:</span><span id="rp_paid_amount"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Date Paid:</span><span id="rp_date_paid"></span>
+                    </div>
+                </div>
+                <div class="small mt-2">
+                    <div>Remarks:</div>
+                    <div id="rp_remarks"></div>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-primary w-100" onclick="printReprintReceipt()">Print Receipt</button>
+                <button type="button" class="btn btn-link w-100 text-muted" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -279,6 +362,72 @@
         if (match) return parseInt(match[0]);
         // Handle "No Room" or other strings by returning a high number
         return str === '-' ? 999999 : str;
+    }
+    function printReprintReceipt() {
+        window.print();
+    }
+    function reprintReceipt(button) {
+        try {
+            const row = button.closest('tr');
+            if (!row) {
+                alert('Receipt data not found.');
+                return;
+            }
+            const cells = row.cells;
+            const index = Array.prototype.indexOf.call(row.parentNode.children, row) + 1;
+            const receiptId = 'R-' + index;
+            const name = cells[0] ? cells[0].textContent.trim() : '';
+            const contact = cells[1] ? cells[1].textContent.trim() : '';
+            const parentName = cells[2] ? cells[2].textContent.trim() : '';
+            const roomText = cells[3] ? cells[3].textContent.trim() : '';
+            const dateEntry = cells[4] ? cells[4].textContent.trim() : '';
+            const dueDate = cells[5] ? cells[5].textContent.trim() : '';
+            const paidAmount = cells[6] ? cells[6].textContent.trim() : '';
+            const status = cells[7] ? cells[7].textContent.trim() : '';
+            const datePaid = cells[8] ? cells[8].textContent.trim() : '';
+            const remarks = cells[9] ? cells[9].textContent.trim() : '';
+            const area = document.getElementById('receiptReprintArea');
+            if (!area) {
+                alert('Receipt layout not available.');
+                return;
+            }
+            const idEl = document.getElementById('rp_id');
+            const printDateEl = document.getElementById('rp_print_date');
+            const nameEl = document.getElementById('rp_name');
+            const contactEl = document.getElementById('rp_contact');
+            const parentEl = document.getElementById('rp_parent');
+            const roomEl = document.getElementById('rp_room');
+            const dateEntryEl = document.getElementById('rp_date_entry');
+            const dueDateEl = document.getElementById('rp_due_date');
+            const statusEl = document.getElementById('rp_status');
+            const paidAmountEl = document.getElementById('rp_paid_amount');
+            const datePaidEl = document.getElementById('rp_date_paid');
+            const remarksEl = document.getElementById('rp_remarks');
+            if (!idEl || !printDateEl || !nameEl || !contactEl || !parentEl || !roomEl || !dateEntryEl || !dueDateEl || !statusEl || !paidAmountEl || !datePaidEl || !remarksEl) {
+                alert('Receipt fields are not available.');
+                return;
+            }
+            idEl.textContent = receiptId;
+            printDateEl.textContent = new Date().toLocaleDateString();
+            nameEl.textContent = name || '-';
+            contactEl.textContent = contact || '-';
+            parentEl.textContent = parentName || '-';
+            roomEl.textContent = roomText || '-';
+            dateEntryEl.textContent = dateEntry || '-';
+            dueDateEl.textContent = dueDate || '-';
+            statusEl.textContent = status || '-';
+            paidAmountEl.textContent = paidAmount || '-';
+            datePaidEl.textContent = datePaid || '-';
+            remarksEl.textContent = remarks || '-';
+            const modalEl = document.getElementById('receiptReprintModal');
+            if (modalEl && window.bootstrap) {
+                const modal = window.bootstrap.Modal.getInstance(modalEl) || new window.bootstrap.Modal(modalEl);
+                modal.show();
+            }
+        } catch (e) {
+            console.error(e);
+            alert('An error occurred while preparing the receipt.');
+        }
     }
 </script>
 {% endblock %}

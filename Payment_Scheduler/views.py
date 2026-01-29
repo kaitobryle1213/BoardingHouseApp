@@ -5,6 +5,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from .models import Customer, Payment, BoardingHouseUser, Room, RoomTransferHistory
 from .forms import CustomerForm, BoardingHouseUserForm, BoardingHouseUserEditForm, RoomForm
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from django.http import JsonResponse
 from django.db.models import Q, Count, F, Sum, Case, When, Value, IntegerField, DecimalField, BooleanField, OuterRef, Subquery
@@ -774,11 +775,17 @@ def process_payment(request):
     if request.method == 'POST':
         payment_id = request.POST.get('payment_id')
         customer_id = request.POST.get('customer_id') 
-        amount_received = request.POST.get('amount_received')
-        change_amount = request.POST.get('change_amount')
+        amount_received_raw = request.POST.get('amount_received') or '0'
+        change_amount_raw = request.POST.get('change_amount') or '0'
         remarks = request.POST.get('remarks')
         
         try:
+            try:
+                amount_received = Decimal(amount_received_raw)
+                change_amount = Decimal(change_amount_raw)
+            except InvalidOperation:
+                return JsonResponse({'success': False, 'error': 'Invalid amount values'})
+
             customer = Customer.objects.get(pk=customer_id)
             
             if payment_id and payment_id.strip() != "":
@@ -803,8 +810,8 @@ def process_payment(request):
             payment.save()
             
             # Advance due date whenever payment is fully paid (early, on time, or late)
-            room_price = customer.room.price if customer.room else 0
-            if customer.due_date and payment.amount_received >= room_price:
+            room_price = customer.room.price if customer.room else Decimal('0')
+            if customer.due_date and amount_received >= room_price:
                 customer.due_date = customer.due_date + relativedelta(months=1)
                 customer.save(update_fields=['due_date'])
             

@@ -55,14 +55,11 @@
                         </div>
 
                     {% elif field.name == 'date_entry' %}
-                        <div class="mb-3" {% if not form.instance.pk %}style="display: none;"{% endif %}>
-                            <label class="form-label text-secondary small">{{ field.label }}</label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="fas {{ field.name|get_icon }}"></i></span>
-                                <input type="date" name="{{ field.name }}" class="form-control" 
-                                       value="{{ field.value|date:'Y-m-d'|default:'' }}" id="{{ field.id_for_label }}">
-                            </div>
-                        </div>
+                        {% if not form.instance.pk %}
+                            <input type="hidden" name="{{ field.name }}" value="{{ field.value|date:'Y-m-d'|default:'' }}" id="{{ field.id_for_label }}">
+                        {% else %}
+                            <input type="hidden" name="{{ field.name }}" value="{{ field.value|date:'Y-m-d'|default:'' }}" id="{{ field.id_for_label }}">
+                        {% endif %}
 
                     {% else %}
                         <div class="mb-3">
