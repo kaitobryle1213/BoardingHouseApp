@@ -18,6 +18,8 @@ urlpatterns = [
     path('api/search_customers/', views.search_customers, name='search_customers'),
     path('api/get_balance/<int:customer_id>/', views.get_customer_balance, name='get_customer_balance'),
     path('api/process_payment/', views.process_payment, name='process_payment'),
+    path('api/customer_payments/<int:customer_id>/', views.customer_payment_history, name='customer_payment_history'),
+    path('api/customer_payment_receipt/<int:customer_id>/<str:due_date>/', views.customer_payment_receipt, name='customer_payment_receipt'),
     
     # Room URLs
     path('rooms/', views.room_view, name='rooms'),

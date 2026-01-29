@@ -787,15 +787,48 @@ def process_payment(request):
                 return JsonResponse({'success': False, 'error': 'Invalid amount values'})
 
             customer = Customer.objects.get(pk=customer_id)
+
+            # Ensure the customer has an active billing cycle
+            if not customer.due_date:
+                customer.due_date = timezone.localdate()
+                customer.save(update_fields=['due_date'])
+            current_due = customer.due_date
+            room_price = customer.room.price if customer.room else Decimal('0')
             
             if payment_id and payment_id.strip() != "":
                 payment = Payment.objects.get(pk=payment_id)
             else:
                 payment = Payment(
                     customer=customer,
-                    amount=customer.room.price if customer.room else 0,
-                    due_date=customer.due_date or timezone.localdate()
+                    amount=room_price,
+                    due_date=current_due
                 )
+
+            # Calculate how much has already been applied to this billing cycle
+            existing_qs = Payment.objects.filter(
+                customer=customer,
+                due_date=current_due,
+                is_paid=True
+            )
+            if payment.pk:
+                existing_qs = existing_qs.exclude(pk=payment.pk)
+            already_paid = existing_qs.aggregate(Sum('amount_received'))['amount_received__sum'] or Decimal('0')
+
+            # Remaining balance for the current cycle (cannot go below zero)
+            remaining_balance = max(room_price - already_paid, Decimal('0'))
+
+            # If the cycle is already fully paid, do not allow additional payments to advance future cycles
+            if room_price > 0 and remaining_balance <= 0:
+                return JsonResponse({'success': False, 'error': 'Current billing cycle is already fully paid. Prepayments are not allowed.'})
+
+            # Amount to apply to this cycle (cannot exceed remaining balance)
+            if room_price > 0:
+                applied_amount = min(amount_received, remaining_balance)
+            else:
+                applied_amount = amount_received
+
+            # Compute change based on how much was actually applied
+            computed_change = max(amount_received - applied_amount, Decimal('0'))
 
             # Record the previous payment date (what was seen on dashboard)
             # Only if we are marking it paid now (it was not paid before)
@@ -803,15 +836,16 @@ def process_payment(request):
             payment.date_paid = timezone.localdate()
             payment.previous_date = payment.date_paid
             
-            payment.amount_received = amount_received
-            payment.change_amount = change_amount
+            payment.amount = room_price
+            payment.amount_received = applied_amount
+            payment.change_amount = computed_change
             payment.remarks = remarks
             payment.is_paid = True
             payment.save()
             
-            # Advance due date whenever payment is fully paid (early, on time, or late)
-            room_price = customer.room.price if customer.room else Decimal('0')
-            if customer.due_date and amount_received >= room_price:
+            # Advance due date when the current cycle is fully paid (early, on time, or late)
+            total_for_cycle = already_paid + applied_amount
+            if customer.due_date and room_price > 0 and total_for_cycle >= room_price:
                 customer.due_date = customer.due_date + relativedelta(months=1)
                 customer.save(update_fields=['due_date'])
             
@@ -865,6 +899,7 @@ def report_view(request):
             total_collected += (p.amount_received or 0)
             
             rows.append({
+                'customer_id': c.pk,
                 'name': c.name,
                 'contact_number': c.contact_number,
                 'parents_name': c.parents_name,
@@ -898,6 +933,7 @@ def report_view(request):
             total_collected += cycle_sum
 
             rows.append({
+                'customer_id': c.pk,
                 'name': c.name,
                 'contact_number': c.contact_number,
                 'parents_name': c.parents_name,
@@ -941,6 +977,115 @@ def report_view(request):
         'filter_name': customer_name,
     }
     return render(request, 'Payment_Scheduler/report.html', context)
+
+
+@login_required
+@admin_required
+def customer_payment_history(request, customer_id):
+    customer = get_object_or_404(Customer, pk=customer_id)
+    payments = Payment.objects.filter(customer=customer).values('due_date').annotate(
+        total_paid=Coalesce(Sum('amount_received'), Value(0, output_field=DecimalField())),
+        last_paid=Max('date_paid'),
+        amount_due=Coalesce(Max('amount'), Value(0, output_field=DecimalField())),
+    ).order_by('due_date')
+
+    history = []
+    for p in payments:
+        due_date = p['due_date']
+        amount_due = p['amount_due'] or Decimal('0')
+        total_paid = p['total_paid'] or Decimal('0')
+        if amount_due > 0 and total_paid >= amount_due:
+            status = "Paid"
+        elif total_paid > 0:
+            status = "Partially Paid"
+        else:
+            status = "Unpaid"
+        history.append({
+            'due_date': due_date.strftime('%Y-%m-%d') if due_date else None,
+            'month_label': due_date.strftime('%b %Y') if due_date else "N/A",
+            'amount_due': f"{amount_due:.2f}",
+            'total_paid': f"{total_paid:.2f}",
+            'last_paid': p['last_paid'].strftime('%Y-%m-%d') if p['last_paid'] else None,
+            'status': status,
+        })
+
+    return JsonResponse({
+        'customer': {
+            'id': customer.pk,
+            'name': customer.name,
+            'room': customer.room.room_number if customer.room else "-",
+        },
+        'history': history,
+    })
+
+
+@login_required
+@admin_required
+def customer_payment_receipt(request, customer_id, due_date):
+    customer = get_object_or_404(Customer, pk=customer_id)
+    try:
+        target_date = date.fromisoformat(due_date)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+
+    payments = Payment.objects.filter(customer=customer, due_date=target_date, is_paid=True).order_by('date_paid', 'pk')
+    if not payments.exists():
+        return JsonResponse({'error': 'No payments found for this record.'}, status=404)
+
+    amount_due = payments.aggregate(
+        amount=Coalesce(Max('amount'), Value(0, output_field=DecimalField()))
+    )['amount'] or Decimal('0')
+    total_paid = payments.aggregate(
+        total=Coalesce(Sum('amount_received'), Value(0, output_field=DecimalField()))
+    )['total'] or Decimal('0')
+    change_total = payments.aggregate(
+        total=Coalesce(Sum('change_amount'), Value(0, output_field=DecimalField()))
+    )['total'] or Decimal('0')
+    last_paid = payments.aggregate(last=Max('date_paid'))['last']
+
+    if amount_due > 0 and total_paid >= amount_due:
+        status = "Paid"
+    elif total_paid > 0:
+        status = "Partially Paid"
+    else:
+        status = "Unpaid"
+
+    combined_remarks_parts = []
+    items = []
+    for p in payments:
+        amount_val = p.amount_received or Decimal('0')
+        items.append({
+            'amount_received': f"{amount_val:.2f}",
+            'date_paid': p.date_paid.strftime('%Y-%m-%d') if p.date_paid else None,
+            'remarks': p.remarks or "",
+        })
+        if p.remarks:
+            combined_remarks_parts.append(p.remarks)
+
+    combined_remarks = " | ".join(combined_remarks_parts) if combined_remarks_parts else ""
+
+    receipt_number = f"R-{customer.customer_id}-{target_date.strftime('%Y%m')}"
+
+    return JsonResponse({
+        'receipt_number': receipt_number,
+        'transaction_time': last_paid.strftime('%Y-%m-%d') if last_paid else None,
+        'amount_due': f"{amount_due:.2f}",
+        'total_paid': f"{total_paid:.2f}",
+        'change': f"{change_total:.2f}",
+        'status': status,
+        'customer': {
+            'id': customer.pk,
+            'name': customer.name,
+            'contact_number': customer.contact_number or "",
+            'parents_name': customer.parents_name or "",
+            'parents_contact_number': customer.parents_contact_number or "",
+            'room': customer.room.room_number if customer.room else "-",
+            'date_entry': customer.date_entry.strftime('%Y-%m-%d') if customer.date_entry else None,
+        },
+        'due_date': target_date.strftime('%Y-%m-%d'),
+        'remarks': combined_remarks,
+        'items': items,
+    })
 
 @login_required
 @admin_required

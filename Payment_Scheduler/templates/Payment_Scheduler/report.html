@@ -175,11 +175,12 @@
                     <th class="sortable" onclick="sortTable(7, 'text')">Status</th>
                     <th class="sortable" onclick="sortTable(8, 'date')">Last Payment Date</th>
                     <th class="sortable" onclick="sortTable(9, 'text')">Remarks</th>
+                    <th class="text-center">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {% for r in rows %}
-                <tr>
+                <tr data-customer-id="{{ r.customer_id }}">
                     <td class="ps-4 fw-medium">{{ r.name }}</td>
                     <td>{{ r.contact_number|default:"-" }}</td>
                     <td>{{ r.parents_name|default:"-" }}</td>
@@ -191,18 +192,28 @@
                     <td class="font-monospace fw-bold {% if r.status == 'Paid' %}text-success{% else %}text-secondary{% endif %}">₱{{ r.paid_amount }}</td>
                     <td class="fw-medium">{% if r.status %}{{ r.status }}{% else %}-{% endif %}</td>
                     <td>{{ r.date_amount_paid|date:"M d, Y"|default:"-" }}</td>
-                    <td class="small text-muted fst-italic">
-                        {{ r.remarks|default:"-" }}
-                        <div class="mt-2">
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="reprintReceipt(this)">
-                                <i class="fas fa-print me-1"></i>Reprint Receipt
+                    <td class="small text-muted fst-italic">{{ r.remarks|default:"-" }}</td>
+                    <td class="text-center">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button"
+                                    class="btn btn-outline-secondary"
+                                    onclick="reprintReceipt(this)"
+                                    title="Reprint Receipt">
+                                <i class="fas fa-print"></i>
+                            </button>
+                            <button type="button"
+                                    class="btn btn-outline-primary"
+                                    onclick="viewPaymentRecords(this)"
+                                    title="View Payment Records">
+                                <i class="fas fa-list-alt me-1"></i>
+                                <span class="d-none d-md-inline">Records</span>
                             </button>
                         </div>
                     </td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="10" class="text-center py-5 text-secondary">
+                    <td colspan="11" class="text-center py-5 text-secondary">
                         <i class="fas fa-file-invoice-dollar fa-2x mb-3 d-block opacity-50"></i>
                         No payment records found for the selected criteria.
                     </td>
@@ -250,7 +261,13 @@
                         <span>Status:</span><span id="rp_status"></span>
                     </div>
                     <div class="d-flex justify-content-between">
+                        <span>Amount Due:</span><span id="rp_amount_due"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
                         <span>Amount Paid:</span><span id="rp_paid_amount"></span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>Change:</span><span id="rp_change"></span>
                     </div>
                     <div class="d-flex justify-content-between">
                         <span>Date Paid:</span><span id="rp_date_paid"></span>
@@ -264,6 +281,48 @@
             <div class="modal-footer border-0">
                 <button type="button" class="btn btn-primary w-100" onclick="printReprintReceipt()">Print Receipt</button>
                 <button type="button" class="btn btn-link w-100 text-muted" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="paymentHistoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    Payment Records – <span id="ph_name"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="small text-muted mb-1" id="ph_summary"></div>
+                <div class="small fw-semibold mb-2" id="ph_total"></div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0">
+                        <thead>
+                            <tr>
+                                <th>Month</th>
+                                <th>Due Date</th>
+                                <th>Amount Due</th>
+                                <th>Total Paid</th>
+                                <th>Last Paid</th>
+                                <th>Status</th>
+                                <th class="text-center">Receipt</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ph_tbody">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-3">
+                                    No payment records found.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -400,10 +459,12 @@
             const dateEntryEl = document.getElementById('rp_date_entry');
             const dueDateEl = document.getElementById('rp_due_date');
             const statusEl = document.getElementById('rp_status');
+            const amountDueEl = document.getElementById('rp_amount_due');
             const paidAmountEl = document.getElementById('rp_paid_amount');
+            const changeEl = document.getElementById('rp_change');
             const datePaidEl = document.getElementById('rp_date_paid');
             const remarksEl = document.getElementById('rp_remarks');
-            if (!idEl || !printDateEl || !nameEl || !contactEl || !parentEl || !roomEl || !dateEntryEl || !dueDateEl || !statusEl || !paidAmountEl || !datePaidEl || !remarksEl) {
+            if (!idEl || !printDateEl || !nameEl || !contactEl || !parentEl || !roomEl || !dateEntryEl || !dueDateEl || !statusEl || !amountDueEl || !paidAmountEl || !changeEl || !datePaidEl || !remarksEl) {
                 alert('Receipt fields are not available.');
                 return;
             }
@@ -416,7 +477,9 @@
             dateEntryEl.textContent = dateEntry || '-';
             dueDateEl.textContent = dueDate || '-';
             statusEl.textContent = status || '-';
+            amountDueEl.textContent = paidAmount || '-';
             paidAmountEl.textContent = paidAmount || '-';
+            changeEl.textContent = '0.00';
             datePaidEl.textContent = datePaid || '-';
             remarksEl.textContent = remarks || '-';
             const modalEl = document.getElementById('receiptReprintModal');
@@ -424,6 +487,246 @@
                 const modal = window.bootstrap.Modal.getInstance(modalEl) || new window.bootstrap.Modal(modalEl);
                 modal.show();
             }
+        } catch (e) {
+            console.error(e);
+            alert('An error occurred while preparing the receipt.');
+        }
+    }
+
+    function viewPaymentRecords(button) {
+        try {
+            const row = button.closest('tr');
+            if (!row) {
+                alert('Customer data not found.');
+                return;
+            }
+            const customerId = row.getAttribute('data-customer-id');
+            if (!customerId) {
+                alert('Customer identifier is missing.');
+                return;
+            }
+
+            const tbody = document.getElementById('ph_tbody');
+            const nameEl = document.getElementById('ph_name');
+            const summaryEl = document.getElementById('ph_summary');
+            const totalEl = document.getElementById('ph_total');
+
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-3">
+                            Loading payment records...
+                        </td>
+                    </tr>`;
+            }
+            if (nameEl) {
+                nameEl.textContent = row.cells[0] ? row.cells[0].textContent.trim() : '';
+            }
+            if (summaryEl) summaryEl.textContent = '';
+            if (totalEl) totalEl.textContent = '';
+
+            const url = `/api/customer_payments/${customerId}/`;
+
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) {
+                        throw new Error('Failed to load payment records.');
+                    }
+                    return res.json();
+                })
+                .then(data => {
+                    if (!tbody) {
+                        return;
+                    }
+
+                    const history = data.history || [];
+
+                    let grandTotal = 0;
+                    history.forEach(item => {
+                        const val = parseFloat(item.total_paid || '0') || 0;
+                        grandTotal += val;
+                    });
+
+                    if (nameEl && data.customer && data.customer.name) {
+                        nameEl.textContent = data.customer.name;
+                    }
+                    if (summaryEl && data.customer) {
+                        const room = data.customer.room || '-';
+                        summaryEl.textContent = `Room: ${room}`;
+                    }
+                    if (totalEl) {
+                        totalEl.textContent = `Total Amount Paid: ₱${grandTotal.toFixed(2)}`;
+                    }
+
+                    const historyModal = document.getElementById('paymentHistoryModal');
+                    if (historyModal && data.customer && data.customer.id) {
+                        historyModal.setAttribute('data-customer-id', data.customer.id);
+                    }
+
+                    if (history.length === 0) {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-3">
+                                    No payment records found.
+                                </td>
+                            </tr>`;
+                        return;
+                    }
+
+                    tbody.innerHTML = '';
+                    history.forEach(item => {
+                        const tr = document.createElement('tr');
+
+                        const status = item.status || '';
+                        let statusClass = '';
+                        if (status === 'Paid') {
+                            statusClass = 'text-success fw-semibold';
+                        } else if (status.indexOf('Partially') !== -1) {
+                            statusClass = 'text-warning fw-semibold';
+                        } else if (status === 'Unpaid') {
+                            statusClass = 'text-danger fw-semibold';
+                        }
+
+                        tr.setAttribute('data-due-date', item.due_date || '');
+
+                        tr.innerHTML = `
+                            <td>${item.month_label || ''}</td>
+                            <td>${item.due_date || ''}</td>
+                            <td>₱${item.amount_due || '0.00'}</td>
+                            <td>₱${item.total_paid || '0.00'}</td>
+                            <td>${item.last_paid || '-'}</td>
+                            <td class="${statusClass}">${status || '-'}</td>
+                            <td class="text-center">
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        onclick="reprintHistoryReceipt(this)"
+                                        title="Reprint Receipt">
+                                    <i class="fas fa-print"></i>
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                })
+                .catch(err => {
+                    console.error(err);
+                    if (tbody) {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="7" class="text-center text-danger py-3">
+                                    Error loading payment records.
+                                </td>
+                            </tr>`;
+                    }
+                })
+                .finally(() => {
+                    const modalEl = document.getElementById('paymentHistoryModal');
+                    if (modalEl && window.bootstrap) {
+                        const modal = window.bootstrap.Modal.getInstance(modalEl) || new window.bootstrap.Modal(modalEl);
+                        modal.show();
+                    }
+                });
+        } catch (e) {
+            console.error(e);
+            alert('An error occurred while loading payment records.');
+        }
+    }
+
+    function reprintHistoryReceipt(button) {
+        try {
+            const row = button.closest('tr');
+            if (!row) {
+                alert('Record data not found.');
+                return;
+            }
+            const historyModal = document.getElementById('paymentHistoryModal');
+            const customerId = historyModal ? historyModal.getAttribute('data-customer-id') : null;
+            const dueDate = row.getAttribute('data-due-date');
+            if (!customerId || !dueDate) {
+                alert('Record identifiers are missing.');
+                return;
+            }
+
+            const url = `/api/customer_payment_receipt/${customerId}/${encodeURIComponent(dueDate)}/`;
+
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) {
+                        throw new Error('Failed to load receipt data.');
+                    }
+                    return res.json();
+                })
+                .then(data => {
+                    const area = document.getElementById('receiptReprintArea');
+                    if (!area) {
+                        alert('Receipt layout not available.');
+                        return;
+                    }
+                    const idEl = document.getElementById('rp_id');
+                    const printDateEl = document.getElementById('rp_print_date');
+                    const nameEl = document.getElementById('rp_name');
+                    const contactEl = document.getElementById('rp_contact');
+                    const parentEl = document.getElementById('rp_parent');
+                    const roomEl = document.getElementById('rp_room');
+                    const dateEntryEl = document.getElementById('rp_date_entry');
+                    const dueDateEl = document.getElementById('rp_due_date');
+                    const statusEl = document.getElementById('rp_status');
+                    const amountDueEl = document.getElementById('rp_amount_due');
+                    const paidAmountEl = document.getElementById('rp_paid_amount');
+                    const changeEl = document.getElementById('rp_change');
+                    const datePaidEl = document.getElementById('rp_date_paid');
+                    const remarksEl = document.getElementById('rp_remarks');
+                    if (!idEl || !printDateEl || !nameEl || !contactEl || !parentEl || !roomEl || !dateEntryEl || !dueDateEl || !statusEl || !amountDueEl || !paidAmountEl || !changeEl || !datePaidEl || !remarksEl) {
+                        alert('Receipt fields are not available.');
+                        return;
+                    }
+
+                    idEl.textContent = data.receipt_number || '';
+                    printDateEl.textContent = new Date().toLocaleDateString();
+
+                    const cust = data.customer || {};
+                    nameEl.textContent = cust.name || '-';
+                    contactEl.textContent = cust.contact_number || '-';
+                    parentEl.textContent = cust.parents_name || '-';
+                    roomEl.textContent = cust.room || '-';
+                    dateEntryEl.textContent = cust.date_entry || '-';
+
+                    dueDateEl.textContent = data.due_date || '-';
+                    statusEl.textContent = data.status || '-';
+                    amountDueEl.textContent = data.amount_due || '0.00';
+                    paidAmountEl.textContent = data.total_paid || '0.00';
+                    changeEl.textContent = data.change || '0.00';
+                    datePaidEl.textContent = data.transaction_time || '-';
+
+                    if (data.items && data.items.length) {
+                        const lines = data.items.map((item, index) => {
+                            const d = item.date_paid || '-';
+                            const amt = item.amount_received || '0.00';
+                            const r = item.remarks || '';
+                            const extra = r ? ' • ' + r : '';
+                            return (index + 1) + '. ' + d + ' • ₱' + amt + extra;
+                        });
+                        remarksEl.textContent = lines.join('\n');
+                    } else {
+                        remarksEl.textContent = data.remarks || '-';
+                    }
+
+                    const historyModalEl = document.getElementById('paymentHistoryModal');
+                    if (historyModalEl && window.bootstrap) {
+                        const historyModal = window.bootstrap.Modal.getInstance(historyModalEl) || new window.bootstrap.Modal(historyModalEl);
+                        historyModal.hide();
+                    }
+
+                    const modalEl = document.getElementById('receiptReprintModal');
+                    if (modalEl && window.bootstrap) {
+                        const modal = window.bootstrap.Modal.getInstance(modalEl) || new window.bootstrap.Modal(modalEl);
+                        modal.show();
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('An error occurred while loading the receipt.');
+                });
         } catch (e) {
             console.error(e);
             alert('An error occurred while preparing the receipt.');
